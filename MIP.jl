@@ -17,3 +17,13 @@ clinicMIP = Model(GlPK.Optimizer)
 @constraints(clinicMIP, begin
     #con 1 -
 end)
+
+
+#MVP - maximise patients scheduled
+
+#constraints
+#are two appointments simultaneous? and DVs
+#simultaneous appointments - not same doctor
+#simultaneous appointments - not same room
+#patient scheduled at most once (in the MVP)
+#appointment blocks must be consecutive
