@@ -12,13 +12,21 @@ numSpecialists = 6
 numAppoints = 80
 lengthOfDay = 50
 bigM = 1000
-strictSlack = 0.5
+strictSlack = 1
 
-TestInfo = CSV.read("testData.csv")
+#TestInfo = CSV.read("testData.csv")
+TestInfo = DataFrame!(CSV.File("testData.csv"))
 
 
-clinicMIP = Model(with_optimizer(CPLEX.Optimizer))
-#set_parameter(clinicMIP,"CPXPARAM_MIP_Display",1)
+#clinicMIP = Model(with_optimizer(CPLEX.Optimizer))
+clinicMIP = Model(CPLEX.Optimizer)
+
+#set_optimizer_attribute(clinicMIP,"CPXPARAM_MIP_Display",3)
+#5% optimality gap
+set_optimizer_attribute(clinicMIP,"CPX_PARAM_EPGAP",0.05)
+
+
+
 SpecialistID=TestInfo[:,:SpecialistID]
 AppointmentLength=TestInfo[:,:AppointmentLength]
 #PatientID=TestInfo[:,:PatientID]
@@ -28,6 +36,7 @@ function array2pos(j)
     fizz[j]=1
     return fizz
 end
+
 specialistTable  = vcat([array2pos(SpecialistID[j]) for j=1:numAppoints]...)
 
 @variable(clinicMIP, beingScheduled[1:numAppoints],Bin)
@@ -42,7 +51,7 @@ specialistTable  = vcat([array2pos(SpecialistID[j]) for j=1:numAppoints]...)
  sum(beingTreatedBy[i,j] for j=1:numSpecialists) == beingScheduled[i])
 
 @constraint(clinicMIP, Overlap1[i=1:numAppoints, j = 1:numAppoints; i != j],
- startingTime[i]-endTime[j]+lengthOfDay*(2-beingScheduled[i]-beingScheduled[j])+strictSlack>= -lengthOfDay*startsBefore[i,j])
+ startingTime[i]-endTime[j]+lengthOfDay*(2-beingScheduled[i]-beingScheduled[j])-strictSlack>= -lengthOfDay*startsBefore[i,j])
 
 @constraint(clinicMIP, Overlap2[i=1:numAppoints, j=1:numAppoints; i!=j],
 endTime[j]-startingTime[i]>=lengthOfDay*(startsBefore[i,j]-1))
@@ -56,7 +65,16 @@ endTime[i]==startingTime[i]+AppointmentLength[i])
 @constraint(clinicMIP, correctSpecialist[i=1:numAppoints,j=1:numSpecialists],
 beingTreatedBy[i,j]<=specialistTable[i,j])
 
-#optimize!(clinicMIP)
+optimize!(clinicMIP)
+
+startingTimeSol=value.(startingTime)
+specialistArraySol = value.(beingTreatedBy)
+
+#specialistSol = mapslices(x->findfirst(x),specialistArraySol.==1,dims=[1])
+
+#specialistSol = vcat([findfirst(specialistArraySol[j,:].==1) for j=1:numAppoints]...)
+specialistSol = vcat([findfirst(specialistArraySol[j,:].==1) for j=1:numAppoints]...)
+
 
 
 #@constraint(clinicMIP, constraint[j=1:2], sum(A[j,i]*x[i] for i=1:3) <= b[j])
