@@ -73,7 +73,7 @@ sum(stdIndex[i,j,k] for k =1:numAppoints) == numAppoints-j+1)
 #limit number of cheats stdIndex gives
 
 @constraint(clinicMIP, stdIsZero[i=1:numSpecialists,j=1:maxAppointsInDay],
-littleMstd<=(1-stdIsZero[i,j])*bigMstd-stdRanked[i,j])
+0<=(1-stdIsZero[i,j])*bigMstd-stdRanked[i,j])
 #need to change this so that when stdIsZero is 1 you get bigMStd if 0 you get littleMstd
 
 
