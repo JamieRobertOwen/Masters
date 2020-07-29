@@ -14,6 +14,7 @@ lengthOfDay = 50
 bigM = 1000
 strictSlack = 1
 
+
 #TestInfo = CSV.read("testData.csv")
 TestInfo = DataFrame!(CSV.File("testData.csv"))
 
@@ -29,6 +30,13 @@ set_optimizer_attribute(clinicMIP,"CPX_PARAM_EPGAP",0.1)
 
 SpecialistID=TestInfo[:,:SpecialistID]
 AppointmentLength=TestInfo[:,:AppointmentLength]
+AppointmentStd=[]
+bigMStd=maximum(AppointmentStd)*1.1
+littleMstd=minimum(AppointmentStd)*0.9
+
+maxAppointsInDay = floor(lengthOfDay/minimum(AppointmentLength))
+
+
 #PatientID=TestInfo[:,:PatientID]
 #specialistTable=zeros(numAppoints,numSpecialists)
 function array2pos(j)
@@ -45,7 +53,29 @@ specialistTable  = vcat([array2pos(SpecialistID[j]) for j=1:numAppoints]...)
 @variable(clinicMIP, beingTreatedBy[1:numAppoints,1:numSpecialists],Bin)
 @variable(clinicMIP, 0<=endTime[1:numAppoints]<=lengthOfDay,Int)
 
+""" test variable """
+@variable(clinicMIP, 0<=stdRanked[1:numSpecialists,1:maxAppointsInDay])
+@variable(clinicMIP, stdIndex[1:numSpecialists,1:maxAppointsInDay,1:numAppoints], Bin)
+@variable(clinicMIP, stdIsZero[1:numSpecialists,1:maxAppointsInDay],Bin)
+
 @objective(clinicMIP, Max, sum(beingScheduled))
+
+""" test constraint """
+@constraint(clinicMIP, stdRanking[i=1:numSpecialists, j=1:maxAppointsInDay, k= 1:maxAppointsInDay; j<k],
+stdRanked[i,j]>= stdRanked[i,k]) #when ranked lower indexes are higher
+
+@constraint(clinicMIP, stdIndexTrue[i=1:numSpecialists,j=1:maxAppointsInDay,k=1:numAppoints],
+stdRanked[i,j] >= stdIndex[i,j,k]*AppointmentStd[k]+(beingTreatedBy[k,i]-1)*bigMStd)
+#make sure that if scheduled stdRanked has to be greater than stdIndex
+
+@constraint(clinicMIP, stdIndexEnsure[i=1:numSpecialists,j=1:maxAppointsInDay]
+sum(stdIndex[i,j,k] for k =1:numAppoints) == numAppoints-j+1)
+#limit number of cheats stdIndex gives
+
+@constraint(clinicMIP, stdIsZero[i=1:numSpecialists,j=1:maxAppointsInDay],
+littleMstd<=(1-stdIsZero[i,j])*bigMstd-stdRanked[i,j])
+#need to change this so that when stdIsZero is 1 you get bigMStd if 0 you get littleMstd
+
 
 @constraint(clinicMIP, ifScheduled[i=1:numAppoints],
  sum(beingTreatedBy[i,j] for j=1:numSpecialists) == beingScheduled[i])

@@ -37,5 +37,7 @@ AppointmentLength = rand(appointmentLengths,numAppoints)
 PatientID= 1:1:numAppoints
 
 #writing test case to file
-Appointment = DataFrame(SpecialistID = SpecialistID,AppointmentLength = AppointmentLength, PatientID = PatientID)
+Appointment = DataFrame(SpecialistID = SpecialistID,
+    AppointmentLength = AppointmentLength,
+    PatientID = PatientID)
 CSV.write("testData.csv",Appointment)
