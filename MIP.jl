@@ -26,7 +26,8 @@ clinicMIP = Model(CPLEX.Optimizer)
 #5% optimality gap
 set_optimizer_attribute(clinicMIP,"CPX_PARAM_EPGAP",0.1)
 
-
+magicA =0.9
+magicB =0.3
 
 SpecialistID=TestInfo[:,:SpecialistID]
 AppointmentLength=TestInfo[:,:AppointmentLength]
@@ -36,6 +37,38 @@ littleMstd=minimum(AppointmentStd)*0.9
 
 maxAppointsInDay = floor(lengthOfDay/minimum(AppointmentLength))
 
+distanceApprox = zeros(Integer,maxAppointsInDay, maxAppointsInDay+1)
+
+distanceApprox[1,1]=1
+#for only 1 appointment return its std
+aplusb = zeros(Integer,maxAppointsInDay,maxAppointsInDay)
+b = zeros(Integer,maxAppointsInDay)
+
+#work out b
+rem=0
+for i=2:maxAppointsInDay
+    div = i
+    count = 0
+    while true
+        rem = div % 2
+        if rem == 0
+            count += 1
+        end
+        div = div ÷ 2
+        div = div + rem
+        div == 1 && break
+    end
+    b[i]=count
+end
+
+
+
+for i =2:(maxAppointsInDay+1)
+    total = i-1
+    for j=1:ceil(Integer,total/2)
+
+    end
+end
 
 #PatientID=TestInfo[:,:PatientID]
 #specialistTable=zeros(numAppoints,numSpecialists)
@@ -54,27 +87,57 @@ specialistTable  = vcat([array2pos(SpecialistID[j]) for j=1:numAppoints]...)
 @variable(clinicMIP, 0<=endTime[1:numAppoints]<=lengthOfDay,Int)
 
 """ test variable """
-@variable(clinicMIP, 0<=stdRanked[1:numSpecialists,1:maxAppointsInDay])
+#@variable(clinicMIP, 0<=stdRanked[1:numSpecialists,1:maxAppointsInDay])
 @variable(clinicMIP, stdIndex[1:numSpecialists,1:maxAppointsInDay,1:numAppoints], Bin)
-@variable(clinicMIP, stdIsZero[1:numSpecialists,1:maxAppointsInDay],Bin)
+#@variable(clinicMIP, stdIsZero[1:numSpecialists,1:maxAppointsInDay],Bin)
+@variable(clinicMIP, stdNZeros[1:numSpecialists,1:(maxAppointsInDay+1)], Bin)
+
+
 
 @objective(clinicMIP, Max, sum(beingScheduled))
 
 """ test constraint """
-@constraint(clinicMIP, stdRanking[i=1:numSpecialists, j=1:maxAppointsInDay, k= 1:maxAppointsInDay; j<k],
-stdRanked[i,j]>= stdRanked[i,k]) #when ranked lower indexes are higher
+function junk()
+    @constraint(clinicMIP, stdRanking[i=1:numSpecialists, j=1:maxAppointsInDay, k= 1:maxAppointsInDay; j<k],
+    stdRanked[i,j]>= stdRanked[i,k]) #when ranked lower indexes are higher
 
-@constraint(clinicMIP, stdIndexTrue[i=1:numSpecialists,j=1:maxAppointsInDay,k=1:numAppoints],
-stdRanked[i,j] >= stdIndex[i,j,k]*AppointmentStd[k]+(beingTreatedBy[k,i]-1)*bigMStd)
-#make sure that if scheduled stdRanked has to be greater than stdIndex
+    @constraint(clinicMIP, stdIndexTrue[i=1:numSpecialists,j=1:maxAppointsInDay,k=1:numAppoints],
+    stdRanked[i,j] >= stdIndex[i,j,k]*AppointmentStd[k]+(beingTreatedBy[k,i]-1)*bigMStd)
+    #make sure that if scheduled stdRanked has to be greater than stdIndex
+
+    @constraint(clinicMIP, stdIndexEnsure[i=1:numSpecialists,j=1:maxAppointsInDay]
+    sum(stdIndex[i,j,k] for k =1:numAppoints) == numAppoints-j+1)
+    #limit number of cheats stdIndex gives
+
+    @constraint(clinicMIP, stdIsZero[i=1:numSpecialists,j=1:maxAppointsInDay],
+    0<=(1-stdIsZero[i,j])*bigMstd-stdRanked[i,j])
+    #need to change this so that when stdIsZero is 1 you get bigMStd if 0 you get littleMstd
+end
+
+@constraint(clinicMIP, stdRanking[i=1:numSpecialists, j=1:maxAppointsInDay, k= 1:maxAppointsInDay; j<k],
+sum(AppointmentStd[l]*(stdIndex[i,j,l]-stdIndex[i,k,l]) for l=1:numAppoints)>= 0)
+#when ranked lower indexes are higher
 
 @constraint(clinicMIP, stdIndexEnsure[i=1:numSpecialists,j=1:maxAppointsInDay]
-sum(stdIndex[i,j,k] for k =1:numAppoints) == numAppoints-j+1)
-#limit number of cheats stdIndex gives
+sum(stdIndex[i,j,k] for k =1:numAppoints) <= 1)
+#each appointment can only have one index maximum
 
-@constraint(clinicMIP, stdIsZero[i=1:numSpecialists,j=1:maxAppointsInDay],
-0<=(1-stdIsZero[i,j])*bigMstd-stdRanked[i,j])
-#need to change this so that when stdIsZero is 1 you get bigMStd if 0 you get littleMstd
+@constraint(clinicMIP, stdNumberOfZeros[i=1:numSpecialists]
+sum(beingTreatedBy[j,i] for j=1:numAppoints)
+== maxAppointsInDay+1-sum(stdNZeros[i,j]*j for j=1:(maxAppointsInDay+1)))
+#counts number of appoints specialist could have compared to maximum
+
+@constraint(clinicMIP, stdIndexTrue[i=1:numSpecialists,k=1:numAppoints],
+sum(stdIndex[i,j,k] for j=1:maxAppointsInDay)>=beingTreatedBy[k,i])
+#if an appointment is scheduled must have an index
+
+@constraint(clinicMIP, stdNZerosRepeats[i=1:numSpecialists]
+sum(stdNZeros[i,j] for j=1:maxAppointsInDay) ==1)
+#make sure the zeros mapping only has one entry
+
+
+
+
 
 
 @constraint(clinicMIP, ifScheduled[i=1:numAppoints],
@@ -109,7 +172,7 @@ specialistSol = vcat([findfirst(specialistArraySol[j,:].==1) for j=1:numAppoints
 
 #nothinginds = findall(isnothing,specialistSol)
 #startingNothing = startingTimeSol[nothinginds
-startingTimeSol =convert(Vector{Union{Nothing, Int64}},startingTimeSol)
+startingTimeSol =convert(Vector{Union{Nothing, Integer}},startingTimeSol)
 startingTimeSol[findall(isnothing,specialistSol)].=nothing
 #@constraint(clinicMIP, constraint[j=1:2], sum(A[j,i]*x[i] for i=1:3) <= b[j])
 
