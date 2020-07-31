@@ -13,6 +13,7 @@ numAppoints = 80
 lengthOfDay = 50
 bigM = 1000
 strictSlack = 1
+maxOvertime = 5
 
 
 #TestInfo = CSV.read("testData.csv")
@@ -25,21 +26,22 @@ clinicMIP = Model(CPLEX.Optimizer)
 #set_optimizer_attribute(clinicMIP,"CPXPARAM_MIP_Display",3)
 #5% optimality gap
 set_optimizer_attribute(clinicMIP,"CPX_PARAM_EPGAP",0.1)
+set_time_limit_sec(clinicMIP, 600)
 
-magicA =0.9
-magicB =0.3
+magicA =2*cos(pi/8)/(1+cos(pi/8))
+magicB =2*sin(pi/8)/(1+cos(pi/8))
 
 SpecialistID=TestInfo[:,:SpecialistID]
 AppointmentLength=TestInfo[:,:AppointmentLength]
-AppointmentStd=[]
-bigMStd=maximum(AppointmentStd)*1.1
-littleMstd=minimum(AppointmentStd)*0.9
+AppointmentStd=TestInfo[:,:AppointmentStd]
 
-maxAppointsInDay = floor(lengthOfDay/minimum(AppointmentLength))
+#littleMstd=minimum(AppointmentStd)*0.9
 
-distanceApprox = zeros(Integer,maxAppointsInDay, maxAppointsInDay+1)
+maxAppointsInDay = floor(Integer,lengthOfDay/minimum(AppointmentLength))
+bigMStd=maximum(AppointmentStd)*maxAppointsInDay
+distanceApprox = zeros(maxAppointsInDay+1, maxAppointsInDay)
 
-distanceApprox[1,1]=1
+
 #for only 1 appointment return its std
 aplusb = zeros(Integer,maxAppointsInDay,maxAppointsInDay)
 b = zeros(Integer,maxAppointsInDay)
@@ -62,13 +64,22 @@ for i=2:maxAppointsInDay
 end
 
 
-
-for i =2:(maxAppointsInDay+1)
-    total = i-1
-    for j=1:ceil(Integer,total/2)
-
+#work out aplusb
+for i =2:maxAppointsInDay
+    maxVal = ceil(Integer,log(2,i))
+    for j=1:(i-1)
+        aplusb[i,j] = min(aplusb[i-1,j]+1,maxVal)
     end
+    aplusb[i,i] = b[i]
 end
+
+#restructure b
+b=hcat([vcat(zeros(Integer,i-1,1), ones(Integer,maxAppointsInDay-i+1)*b[i]) for i=1:maxAppointsInDay]...)
+
+
+#work out distanceApprox
+distanceApprox[2:(maxAppointsInDay+1),:]=(aplusb-b)*magicA +b*magicB
+distanceApprox[2,1]=1
 
 #PatientID=TestInfo[:,:PatientID]
 #specialistTable=zeros(numAppoints,numSpecialists)
@@ -90,27 +101,27 @@ specialistTable  = vcat([array2pos(SpecialistID[j]) for j=1:numAppoints]...)
 #@variable(clinicMIP, 0<=stdRanked[1:numSpecialists,1:maxAppointsInDay])
 @variable(clinicMIP, stdIndex[1:numSpecialists,1:maxAppointsInDay,1:numAppoints], Bin)
 #@variable(clinicMIP, stdIsZero[1:numSpecialists,1:maxAppointsInDay],Bin)
-@variable(clinicMIP, stdNZeros[1:numSpecialists,1:(maxAppointsInDay+1)], Bin)
+@variable(clinicMIP, stdAppointNbr[1:numSpecialists,1:(maxAppointsInDay+1)], Bin)
 
-
+@variable(clinicMIP,std[1:numSpecialists])
 
 @objective(clinicMIP, Max, sum(beingScheduled))
 
 """ test constraint """
 function junk()
-    @constraint(clinicMIP, stdRanking[i=1:numSpecialists, j=1:maxAppointsInDay, k= 1:maxAppointsInDay; j<k],
-    stdRanked[i,j]>= stdRanked[i,k]) #when ranked lower indexes are higher
+    #@constraint(clinicMIP, stdRanking[i=1:numSpecialists, j=1:maxAppointsInDay, k= 1:maxAppointsInDay; j<k],
+    #stdRanked[i,j]>= stdRanked[i,k]) #when ranked lower indexes are higher
 
-    @constraint(clinicMIP, stdIndexTrue[i=1:numSpecialists,j=1:maxAppointsInDay,k=1:numAppoints],
-    stdRanked[i,j] >= stdIndex[i,j,k]*AppointmentStd[k]+(beingTreatedBy[k,i]-1)*bigMStd)
+    #@constraint(clinicMIP, stdIndexTrue[i=1:numSpecialists,j=1:maxAppointsInDay,k=1:numAppoints],
+    #stdRanked[i,j] >= stdIndex[i,j,k]*AppointmentStd[k]+(beingTreatedBy[k,i]-1)*bigMStd)
     #make sure that if scheduled stdRanked has to be greater than stdIndex
 
-    @constraint(clinicMIP, stdIndexEnsure[i=1:numSpecialists,j=1:maxAppointsInDay]
-    sum(stdIndex[i,j,k] for k =1:numAppoints) == numAppoints-j+1)
+    #@constraint(clinicMIP, stdIndexEnsure[i=1:numSpecialists,j=1:maxAppointsInDay]
+    #sum(stdIndex[i,j,k] for k =1:numAppoints) == numAppoints-j+1)
     #limit number of cheats stdIndex gives
 
-    @constraint(clinicMIP, stdIsZero[i=1:numSpecialists,j=1:maxAppointsInDay],
-    0<=(1-stdIsZero[i,j])*bigMstd-stdRanked[i,j])
+    #@constraint(clinicMIP, stdIsZero[i=1:numSpecialists,j=1:maxAppointsInDay],
+    #0<=(1-stdIsZero[i,j])*bigMstd-stdRanked[i,j])
     #need to change this so that when stdIsZero is 1 you get bigMStd if 0 you get littleMstd
 end
 
@@ -118,26 +129,31 @@ end
 sum(AppointmentStd[l]*(stdIndex[i,j,l]-stdIndex[i,k,l]) for l=1:numAppoints)>= 0)
 #when ranked lower indexes are higher
 
-@constraint(clinicMIP, stdIndexEnsure[i=1:numSpecialists,j=1:maxAppointsInDay]
-sum(stdIndex[i,j,k] for k =1:numAppoints) <= 1)
+@constraint(clinicMIP, stdIndexEnsure[i=1:numSpecialists,j=1:maxAppointsInDay],
+sum(stdIndex[i,j,k] for k=1:numAppoints) <= 1)
 #each appointment can only have one index maximum
 
-@constraint(clinicMIP, stdNumberOfZeros[i=1:numSpecialists]
-sum(beingTreatedBy[j,i] for j=1:numAppoints)
-== maxAppointsInDay+1-sum(stdNZeros[i,j]*j for j=1:(maxAppointsInDay+1)))
+@constraint(clinicMIP, stdNumberOfZeros[i=1:numSpecialists],
+sum(stdIndex[i,j,k] for j=1:maxAppointsInDay, k=1:numAppoints)
+== sum(stdAppointNbr[i,j]*(j-1) for j=1:(maxAppointsInDay+1)))
 #counts number of appoints specialist could have compared to maximum
 
 @constraint(clinicMIP, stdIndexTrue[i=1:numSpecialists,k=1:numAppoints],
 sum(stdIndex[i,j,k] for j=1:maxAppointsInDay)>=beingTreatedBy[k,i])
 #if an appointment is scheduled must have an index
 
-@constraint(clinicMIP, stdNZerosRepeats[i=1:numSpecialists]
-sum(stdNZeros[i,j] for j=1:maxAppointsInDay) ==1)
-#make sure the zeros mapping only has one entry
+@constraint(clinicMIP, stdAppointNbrRepeats[i=1:numSpecialists],
+sum(stdAppointNbr[i,j] for j=1:maxAppointsInDay) ==1)
+#make sure that appointnumber is mapped correctly
 
+@constraint(clinicMIP,stdApprox[i=1:numSpecialists, k=1:(maxAppointsInDay+1)],
+sum(stdIndex[i,j,l]*distanceApprox[k,j]*AppointmentStd[l]
+ for j=1:maxAppointsInDay, l=1:numAppoints)-stdAppointNbr[i,k]*bigMStd<=std[i])
+#calculates the approximate standard deviation
 
-
-
+@constraint(clinicMIP, overtime[i=1:numSpecialists],
+sum(beingTreatedBy[j,i]*AppointmentLength[j] for j=1:numAppoints)+2*std[i] <= lengthOfDay+maxOvertime
+)
 
 
 @constraint(clinicMIP, ifScheduled[i=1:numAppoints],
@@ -157,6 +173,7 @@ endTime[i]==startingTime[i]+AppointmentLength[i])
 
 @constraint(clinicMIP, correctSpecialist[i=1:numAppoints,j=1:numSpecialists],
 beingTreatedBy[i,j]<=specialistTable[i,j])
+
 
 optimize!(clinicMIP)
 

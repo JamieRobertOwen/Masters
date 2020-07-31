@@ -7,7 +7,7 @@ using CSV, DataFrames
 #default variables
 NumPatients = 20
 numSpecialists = 6
-appointmentLengths = [1,2,3]
+appointmentLengths = [3,5,6]
 numAppoints = 80
 function junk()
 
@@ -35,9 +35,10 @@ AppointmentLength = rand(appointmentLengths,numAppoints)
 #only allowing patients to have one appointment
 #PatientID=rand(1:1:numPatients,numAppoints)
 PatientID= 1:1:numAppoints
-
+AppointmentStd = rand(Float64,numAppoints)
 #writing test case to file
 Appointment = DataFrame(SpecialistID = SpecialistID,
     AppointmentLength = AppointmentLength,
-    PatientID = PatientID)
+    PatientID = PatientID,
+    AppointmentStd = AppointmentStd)
 CSV.write("testData.csv",Appointment)
