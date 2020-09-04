@@ -25,8 +25,9 @@ clinicMIP = Model(CPLEX.Optimizer)
 
 #set_optimizer_attribute(clinicMIP,"CPXPARAM_MIP_Display",3)
 #5% optimality gap
+
 set_optimizer_attribute(clinicMIP,"CPX_PARAM_EPGAP",0.1)
-set_time_limit_sec(clinicMIP, 600)
+set_time_limit_sec(clinicMIP, 1200)
 
 magicA =2*cos(pi/8)/(1+cos(pi/8))
 magicB =2*sin(pi/8)/(1+cos(pi/8))
@@ -37,14 +38,14 @@ AppointmentStd=TestInfo[:,:AppointmentStd]
 
 #littleMstd=minimum(AppointmentStd)*0.9
 
-maxAppointsInDay = floor(Integer,lengthOfDay/minimum(AppointmentLength))
+maxAppointsInDay = floor(Int,lengthOfDay/minimum(AppointmentLength))
 bigMStd=maximum(AppointmentStd)*maxAppointsInDay
 distanceApprox = zeros(maxAppointsInDay+1, maxAppointsInDay)
 
 
 #for only 1 appointment return its std
-aplusb = zeros(Integer,maxAppointsInDay,maxAppointsInDay)
-b = zeros(Integer,maxAppointsInDay)
+aplusb = zeros(Int,maxAppointsInDay,maxAppointsInDay)
+b = zeros(Int,maxAppointsInDay)
 
 #work out b
 rem=0
@@ -66,7 +67,7 @@ end
 
 #work out aplusb
 for i =2:maxAppointsInDay
-    maxVal = ceil(Integer,log(2,i))
+    maxVal = ceil(Int,log(2,i))
     for j=1:(i-1)
         aplusb[i,j] = min(aplusb[i-1,j]+1,maxVal)
     end
@@ -74,12 +75,19 @@ for i =2:maxAppointsInDay
 end
 
 #restructure b
-b=hcat([vcat(zeros(Integer,i-1,1), ones(Integer,maxAppointsInDay-i+1)*b[i]) for i=1:maxAppointsInDay]...)
+b=hcat([vcat(zeros(Int,i-1,1), ones(Int,maxAppointsInDay-i+1)*b[i]) for i=1:maxAppointsInDay]...)
 
 
 #work out distanceApprox
-distanceApprox[2:(maxAppointsInDay+1),:]=(aplusb-b)*magicA +b*magicB
-distanceApprox[2,1]=1
+#distanceApprox[2:(maxAppointsInDay+1),:]=(aplusb-b)*magicA +b*magicB
+
+
+
+
+distanceApprox[2:(maxAppointsInDay+1),:]=.^(magicA,aplusb-b).* .^(magicB,b)
+
+#distanceApprox[2:(maxAppointsInDay+1),:]=aMag.*bMag
+#distanceApprox[2,1]=1
 
 #PatientID=TestInfo[:,:PatientID]
 #specialistTable=zeros(numAppoints,numSpecialists)
@@ -143,17 +151,17 @@ sum(stdIndex[i,j,k] for j=1:maxAppointsInDay)>=beingTreatedBy[k,i])
 #if an appointment is scheduled must have an index
 
 @constraint(clinicMIP, stdAppointNbrRepeats[i=1:numSpecialists],
-sum(stdAppointNbr[i,j] for j=1:maxAppointsInDay) ==1)
+sum(stdAppointNbr[i,j] for j=1:(maxAppointsInDay+1)) ==1)
 #make sure that appointnumber is mapped correctly
 
 @constraint(clinicMIP,stdApprox[i=1:numSpecialists, k=1:(maxAppointsInDay+1)],
 sum(stdIndex[i,j,l]*distanceApprox[k,j]*AppointmentStd[l]
- for j=1:maxAppointsInDay, l=1:numAppoints)-stdAppointNbr[i,k]*bigMStd<=std[i])
+ for j=1:maxAppointsInDay, l=1:numAppoints)-(1-stdAppointNbr[i,k])*bigMStd<=std[i])
 #calculates the approximate standard deviation
 
 @constraint(clinicMIP, overtime[i=1:numSpecialists],
-sum(beingTreatedBy[j,i]*AppointmentLength[j] for j=1:numAppoints)+2*std[i] <= lengthOfDay+maxOvertime
-)
+sum(beingTreatedBy[j,i]*AppointmentLength[j] for j=1:numAppoints)+2*std[i] <= lengthOfDay+maxOvertime)
+
 
 
 @constraint(clinicMIP, ifScheduled[i=1:numAppoints],
@@ -177,8 +185,9 @@ beingTreatedBy[i,j]<=specialistTable[i,j])
 
 optimize!(clinicMIP)
 
-startingTimeSol=value.(startingTime)
-specialistArraySol = value.(beingTreatedBy)
+startingTimeSol=round.(Int,value.(startingTime))
+specialistArraySol = round.(Int,value.(beingTreatedBy))
+stdApproxSol = value.(std)
 
 #specialistSol = mapslices(x->findfirst(x),specialistArraySol.==1,dims=[1])
 
@@ -189,7 +198,7 @@ specialistSol = vcat([findfirst(specialistArraySol[j,:].==1) for j=1:numAppoints
 
 #nothinginds = findall(isnothing,specialistSol)
 #startingNothing = startingTimeSol[nothinginds
-startingTimeSol =convert(Vector{Union{Nothing, Integer}},startingTimeSol)
+startingTimeSol =convert(Vector{Union{Nothing, Int}},startingTimeSol)
 startingTimeSol[findall(isnothing,specialistSol)].=nothing
 #@constraint(clinicMIP, constraint[j=1:2], sum(A[j,i]*x[i] for i=1:3) <= b[j])
 
